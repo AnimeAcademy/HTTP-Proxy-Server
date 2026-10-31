@@ -12,6 +12,10 @@ using namespace std;
 
 int main(int argc, char* argv[])
 {
+    if (!argv[1]) {
+        cout << "To correctly run this program please pass in a correct port number between 1 and 65535." << endl;
+        return 1;
+    }
     int port = stoi(argv[1]);
     if (port < 1 || port > 65535) {
         cout << "To correctly run this program please pass in a correct port number between 1 and 65535." << endl;
@@ -39,14 +43,16 @@ int main(int argc, char* argv[])
         addr.sin_port = htons(PORT);
         addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
-        int res = bind(sock, (sockaddr*)&addr, sizeof(addr));
+        res = bind(sock, (sockaddr*)&addr, sizeof(addr));
         if (res == SOCKET_ERROR) {
             cout << "bind: " << WSAGetLastError() << endl;
+            return 1;
         }
         
         res = listen(sock, SOMAXCONN);
         if (res == SOCKET_ERROR) {
             cout << "listen: " << WSAGetLastError() << endl;
+            return 1;
         }
 
         //Set Socket to non-blocking
@@ -67,8 +73,10 @@ int main(int argc, char* argv[])
             if (clientSock == INVALID_SOCKET) {
                 if(WSAGetLastError() != WSAEWOULDBLOCK)
                     cout << "accept: " << WSAGetLastError() << endl;
+                this_thread::sleep_for(chrono::microseconds(100));
             }
             else {
+                //run thread
 
             }
 
@@ -78,42 +86,107 @@ int main(int argc, char* argv[])
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-        
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 }
 
-// Run program: Ctrl + F5 or Debug > Start Without Debugging menu
-// Debug program: F5 or Debug > Start Debugging menu
+void Client(SOCKET clientSock) {
+#define BUF_LEN 1400
+    char buf[BUF_LEN + 1]; //leave room for \0
+    string message;
+    int res;
+    while (true) {
+        res = recv(clientSock, buf, BUF_LEN, 0); // resv = num of bytes recieved
+        if (res == SOCKET_ERROR) {
+            int error = WSAGetLastError();
+            if (error != WSAEWOULDBLOCK) {
+                cout << "recv: " << error << endl;
+                return;
+            }
+            else {
+                cout << ". " << flush;
+                this_thread::sleep_for(chrono::milliseconds(100));
+            }
+        }
+        else if (res == 0) {//done receiving
+            break;
+        }
+        else {//take recieved bytes and store full message then check to see if we have the request
+            //buf[res] = '\0';
+            message.append(buf, res);
+            size_t pos = message.find("\r\n\r\n");
+            if (pos != string::npos) {
+                //found it and continue with request
+                CreateSocket(message);
+            }
+            //cout << buf << flush;
+        }
+    }
+}
 
-// Tips for Getting Started: 
-//   1. Use the Solution Explorer window to add/manage files
-//   2. Use the Team Explorer window to connect to source control
-//   3. Use the Output window to see build output and other messages
-//   4. Use the Error List window to view errors
-//   5. Go to Project > Add New Item to create new code files, or Project > Add Existing Item to add existing code files to the project
-//   6. In the future, to open this project again, go to File > Open > Project and select the .sln file
+SOCKET CreateSocket(string message) {
+    size_t start = message.find("GET ");
+    if (start == string::npos) {
+        cout << "GET not found" << endl;
+        return;
+    }
+
+    start += string("GET ").length();
+    size_t end = message.find("\r\n", start);
+    if (end == string::npos) {
+        cout << "End of line not found" << endl;
+        return;
+    }
+
+    size_t length = end - start;
+    string request = message.substr(start, length);
+    size_t pos = request.find(' ');
+
+    if (pos != string::npos) {
+        string resource = request.substr(0, pos);
+        string version = request.substr(pos + 1);
+    }
+
+    start = message.find("Host: ");
+    if (start == string::npos) {
+        cout << "Host: not found" << endl;
+        return;
+    }
+
+    start += string("Host: ").length();
+    end = message.find("\r\n", start);
+    if (end == string::npos) {
+        cout << "End of line not found" << endl;
+        return;
+    }
+
+    length = end - start;
+    string hostName = message.substr(start, length);
+
+
+
+
+    //Create a TCP Socket
+    SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock == INVALID_SOCKET) {
+        cout << "socket: " << WSAGetLastError() << endl;
+        return 1;
+    }
+    //Create Address Object
+    sockaddr_in myAddr; //destination
+    memset(myAddr.sin_zero, 0, sizeof(myAddr.sin_zero));
+    myAddr.sin_family = AF_INET;
+    myAddr.sin_port = htons(80);
+
+    int res = inet_pton(AF_INET, (const char*)&hostName, &myAddr.sin_addr);
+    if (res != 1) {
+        cout << "inet_pton: " << WSAGetLastError() << endl;
+        addrinfo* results = nullptr;
+        res = getaddrinfo(hostName.c_str(), "80", nullptr, &results);
+    }
+
+    //Connect Socket
+    res = connect(sock, reinterpret_cast<sockaddr*>(&myAddr), sizeof(myAddr));
+    if (res == SOCKET_ERROR) {
+        cout << "connect: " << WSAGetLastError() << endl;
+        return 1;
+    }
+}
