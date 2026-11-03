@@ -92,6 +92,7 @@ void Client(SOCKET clientSock) {
 #define BUF_LEN 1400
     char buf[BUF_LEN + 1]; //leave room for \0
     string message;
+    SOCKET sock;
     int res;
     while (true) {
         res = recv(clientSock, buf, BUF_LEN, 0); // resv = num of bytes recieved
@@ -110,83 +111,150 @@ void Client(SOCKET clientSock) {
             break;
         }
         else {//take recieved bytes and store full message then check to see if we have the request
-            //buf[res] = '\0';
             message.append(buf, res);
             size_t pos = message.find("\r\n\r\n");
             if (pos != string::npos) {
                 //found it and continue with request
-                CreateSocket(message);
+                sock = CreateSocketFromMessageRequest(message);
+                break;
             }
-            //cout << buf << flush;
+
         }
     }
+    //size_t start = message.find("GET ");
+    //if (start == string::npos) {
+    //    cout << "GET not found" << endl;
+    //}
+
+    //start += string("GET ").length();
+    //size_t end = message.find("\r\n", start);
+    //if (end == string::npos) {
+    //    cout << "End of line not found" << endl;
+    //}
+
+    //size_t length = end - start;
+    //string request = message.substr(start, length);
+    //size_t pos = request.find(' ');
+
+    //if (pos != string::npos) {
+    //    string resource = request.substr(0, pos);
+    //    string version = request.substr(pos + 1);
+    //}
+
+    //Send request to server
+    int totalBytes = (int)message.length();
+    int bytesSent = 0;
+    while (bytesSent != totalBytes) {
+        res = send(sock, (message.c_str() + bytesSent), (totalBytes - bytesSent), 0);
+        if (res == SOCKET_ERROR) {
+            if (WSAGetLastError() != WSAEWOULDBLOCK) {
+                cout << "send: " << WSAGetLastError() << endl;
+                return;
+            }
+            this_thread::sleep_for(chrono::milliseconds(100));
+        }
+        else
+            bytesSent += res;
+    }
+
+    //Tell Server I'm done sending
+    res = shutdown(sock, SD_SEND);
+    if (res == SOCKET_ERROR) {
+        cout << "shutdown: " << WSAGetLastError() << endl;
+        return;
+    }
+
+
+    //recieve data requested
+
+
+    //send data back to client
+
+
+    //close everything up
 }
 
-SOCKET CreateSocket(string message) {
-    size_t start = message.find("GET ");
-    if (start == string::npos) {
-        cout << "GET not found" << endl;
-        return;
-    }
-
-    start += string("GET ").length();
-    size_t end = message.find("\r\n", start);
-    if (end == string::npos) {
-        cout << "End of line not found" << endl;
-        return;
-    }
-
-    size_t length = end - start;
-    string request = message.substr(start, length);
-    size_t pos = request.find(' ');
-
-    if (pos != string::npos) {
-        string resource = request.substr(0, pos);
-        string version = request.substr(pos + 1);
-    }
-
-    start = message.find("Host: ");
+SOCKET CreateSocketFromMessageRequest(string message) {
+    size_t start = message.find("Host: ");
     if (start == string::npos) {
         cout << "Host: not found" << endl;
-        return;
+        return INVALID_SOCKET;
     }
 
     start += string("Host: ").length();
-    end = message.find("\r\n", start);
+    size_t end = message.find("\r\n", start);
     if (end == string::npos) {
         cout << "End of line not found" << endl;
-        return;
+        return INVALID_SOCKET;
     }
 
-    length = end - start;
+    size_t length = end - start;
     string hostName = message.substr(start, length);
 
 
-
-
-    //Create a TCP Socket
-    SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (sock == INVALID_SOCKET) {
-        cout << "socket: " << WSAGetLastError() << endl;
-        return 1;
-    }
     //Create Address Object
     sockaddr_in myAddr; //destination
     memset(myAddr.sin_zero, 0, sizeof(myAddr.sin_zero));
     myAddr.sin_family = AF_INET;
     myAddr.sin_port = htons(80);
 
-    int res = inet_pton(AF_INET, (const char*)&hostName, &myAddr.sin_addr);
-    if (res != 1) {
-        cout << "inet_pton: " << WSAGetLastError() << endl;
+    SOCKET sock = INVALID_SOCKET;
+    int res = inet_pton(AF_INET, hostName.c_str(), &myAddr.sin_addr);
+    if (res == 0) {
+
+        addrinfo hints{};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_protocol = IPPROTO_TCP;
+
         addrinfo* results = nullptr;
-        res = getaddrinfo(hostName.c_str(), "80", nullptr, &results);
+        res = getaddrinfo(hostName.c_str(), "80", &hints, &results);
+        if (res != 0) {
+            cout << "getaddrinfo failed: " << res << endl;
+            return INVALID_SOCKET;
+        }
+        for (addrinfo* current = results;
+            current != nullptr;
+            current = current->ai_next) {
+
+            SOCKET sok = socket(current->ai_family, current->ai_socktype, current->ai_protocol);
+            if (sok == INVALID_SOCKET) {
+                cout << "socket: " << WSAGetLastError() << endl;
+                continue;
+            }
+            else {
+                res = connect(sok, current->ai_addr, current->ai_addrlen);
+                if (res == SOCKET_ERROR) {
+                    cout << "connect: " << WSAGetLastError() << endl;
+                    closesocket(sok);
+                    continue;
+                }
+                else {
+                    sock = sok;
+                    break;
+                }
+            }
+        }
+        freeaddrinfo(results);
+    }
+    else if (res == 1) {//if inet worked
+        //Create a TCP Socket
+        sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (sock == INVALID_SOCKET) {
+            cout << "socket: " << WSAGetLastError() << endl;
+            return INVALID_SOCKET;
+        }
+        //Connect Socket
+        res = connect(sock, reinterpret_cast<sockaddr*>(&myAddr), sizeof(myAddr));
+        if (res == SOCKET_ERROR) {
+            cout << "connect: " << WSAGetLastError() << endl;
+            return INVALID_SOCKET;
+        }
+    }
+    else {
+        cout << "inet_pton: " << WSAGetLastError() << endl;
+        return INVALID_SOCKET;
     }
 
-    //Connect Socket
-    res = connect(sock, reinterpret_cast<sockaddr*>(&myAddr), sizeof(myAddr));
-    if (res == SOCKET_ERROR) {
-        cout << "connect: " << WSAGetLastError() << endl;
-        return 1;
-    }
+    return sock;
 }
