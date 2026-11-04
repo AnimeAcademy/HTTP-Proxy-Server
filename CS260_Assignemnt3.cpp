@@ -73,18 +73,24 @@ int main(int argc, char* argv[])
             if (clientSock == INVALID_SOCKET) {
                 if(WSAGetLastError() != WSAEWOULDBLOCK)
                     cout << "accept: " << WSAGetLastError() << endl;
-                this_thread::sleep_for(chrono::microseconds(100));
+                this_thread::sleep_for(chrono::milliseconds(100));
             }
             else {
                 //run thread
-
+                thread worker(Client, clientSock);
+                Worker.detatch();
             }
 
 
         }
 
 
-
+    //Shutting Down Library
+    res = WSACleanup();
+    if (res != 0) {
+        cout << "WSACleanup: " << WSAGetLastError() << endl;
+        return 1;
+    }
 
 }
 
@@ -92,7 +98,7 @@ void Client(SOCKET clientSock) {
 #define BUF_LEN 1400
     char buf[BUF_LEN + 1]; //leave room for \0
     string message;
-    SOCKET sock;
+    SOCKET sock = INVALID_SOCKET;
     int res;
     while (true) {
         res = recv(clientSock, buf, BUF_LEN, 0); // resv = num of bytes recieved
@@ -116,30 +122,14 @@ void Client(SOCKET clientSock) {
             if (pos != string::npos) {
                 //found it and continue with request
                 sock = CreateSocketFromMessageRequest(message);
+                if (sock == INVALID_SOCKET) {
+                    return;
+                }
                 break;
             }
 
         }
     }
-    //size_t start = message.find("GET ");
-    //if (start == string::npos) {
-    //    cout << "GET not found" << endl;
-    //}
-
-    //start += string("GET ").length();
-    //size_t end = message.find("\r\n", start);
-    //if (end == string::npos) {
-    //    cout << "End of line not found" << endl;
-    //}
-
-    //size_t length = end - start;
-    //string request = message.substr(start, length);
-    //size_t pos = request.find(' ');
-
-    //if (pos != string::npos) {
-    //    string resource = request.substr(0, pos);
-    //    string version = request.substr(pos + 1);
-    //}
 
     //Send request to server
     int totalBytes = (int)message.length();
@@ -165,13 +155,58 @@ void Client(SOCKET clientSock) {
     }
 
 
-    //recieve data requested
+    //recieve data requested from server and close socket
+    totalBytes = sizeof(buf);
+    int bytesRecieved = 0;
+    while (bytesRecieved != totalBytes) {
+        res = recv(sock,(buf + bytesRecieved), (BUF_LEN- bytesRecieved), 0);
+        if (res == SOCKET_ERROR) {
+            cout << "recv: " << WSAGetLastError() << endl;
+            return;
+        }
+        if (res == 0) {
+            buf[bytesRecieved] = '\0';
+            break;
+        }
+        bytesRecieved += res;
+    }
+    //Close Server Socket
+    res = closesocket(sock);
+    if (res != 0) {
+        cout << "closesocket: " << WSAGetLastError() << endl;
+        return;
+    }
 
 
     //send data back to client
+    totalBytes = bytesRecieved;
+    bytesSent = 0;
+    while (bytesSent < bytesRecieved) {
+        res = send(clientSock, (buf + bytesSent), (totalBytes - bytesSent), 0);
+        if (res == SOCKET_ERROR) {
+            if (WSAGetLastError() != WSAEWOULDBLOCK) {
+                cout << "send: " << WSAGetLastError() << endl;
+                return;
+            }
+            this_thread::sleep_for(chrono::milliseconds(100));
+        }
+        else
+            bytesSent += res;
+    }
 
+    //Tell Client I'm done sending
+    res = shutdown(clientSock, SD_SEND);
+    if (res == SOCKET_ERROR) {
+        cout << "shutdown: " << WSAGetLastError() << endl;
+        return;
+    }
 
-    //close everything up
+    //Close client Socket
+    res = closesocket(clientSock);
+    if (res != 0) {
+        cout << "closesocket: " << WSAGetLastError() << endl;
+        return;
+    }
 }
 
 SOCKET CreateSocketFromMessageRequest(string message) {
