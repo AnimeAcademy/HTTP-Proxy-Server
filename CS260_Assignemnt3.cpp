@@ -1,22 +1,44 @@
-// CS260_Assignemnt3.cpp : This file contains the 'main' function. Program execution begins and ends there.
-//
 #include <WinSock2.h>
 #include <Ws2tcpip.h>
 #include <iostream>
 #include <string>
+#include <cstring>
 #include <chrono>
 #include <thread>
+
 
 using namespace std;
 #pragma comment(lib, "ws2_32.lib")
 
+void Client(SOCKET sock);
+SOCKET CreateSocketFromMessageRequest(string message);
+
 int main(int argc, char* argv[])
 {
+    int port = 0;
     if (!argv[1]) {
         cout << "To correctly run this program please pass in a correct port number between 1 and 65535." << endl;
         return 1;
     }
-    int port = stoi(argv[1]);
+    try {
+        size_t pos = 0;
+        port = stoi(argv[1], &pos);
+        if (pos != strlen(argv[1])) {
+            cout << "Invalid port number" << endl;
+            cout << "To correctly run this program please pass in a correct port number between 1 and 65535." << endl;
+            return 1;
+        }
+    }
+    catch (const invalid_argument&){
+        cout << "Not a valid number" << endl;
+        cout << "To correctly run this program please pass in a correct port number between 1 and 65535." << endl;
+        return 1;
+    }
+    catch(const out_of_range&) {
+        cout << "Number is too large" << endl;
+        cout << "To correctly run this program please pass in a correct port number between 1 and 65535." << endl;
+        return 1;
+    }
     if (port < 1 || port > 65535) {
         cout << "To correctly run this program please pass in a correct port number between 1 and 65535." << endl;
         return 1;
@@ -66,7 +88,11 @@ int main(int argc, char* argv[])
 
         sockaddr_in clientAddr{};
         int addrLen = sizeof(clientAddr);
+       
+        //print what port we are listening on
+        cout << "Listening on port " << port << endl;
 
+        //Listens and accepts incoming traffic
         while (true) {
           
             SOCKET clientSock = accept(sock, (sockaddr*)&clientAddr, &addrLen);
@@ -78,12 +104,13 @@ int main(int argc, char* argv[])
             else {
                 //run thread
                 thread worker(Client, clientSock);
-                Worker.detatch();
+                worker.detach();
             }
 
 
         }
 
+        //closesocket(sock);
 
     //Shutting Down Library
     res = WSACleanup();
@@ -106,15 +133,16 @@ void Client(SOCKET clientSock) {
             int error = WSAGetLastError();
             if (error != WSAEWOULDBLOCK) {
                 cout << "recv: " << error << endl;
+                closesocket(clientSock);
                 return;
             }
             else {
-                cout << ". " << flush;
                 this_thread::sleep_for(chrono::milliseconds(100));
             }
         }
         else if (res == 0) {//done receiving
-            break;
+            closesocket(clientSock);
+            return;
         }
         else {//take recieved bytes and store full message then check to see if we have the request
             message.append(buf, res);
@@ -123,6 +151,7 @@ void Client(SOCKET clientSock) {
                 //found it and continue with request
                 sock = CreateSocketFromMessageRequest(message);
                 if (sock == INVALID_SOCKET) {
+                    closesocket(clientSock);
                     return;
                 }
                 break;
@@ -139,74 +168,92 @@ void Client(SOCKET clientSock) {
         if (res == SOCKET_ERROR) {
             if (WSAGetLastError() != WSAEWOULDBLOCK) {
                 cout << "send: " << WSAGetLastError() << endl;
+                closesocket(clientSock);
+                closesocket(sock);
                 return;
             }
             this_thread::sleep_for(chrono::milliseconds(100));
         }
+        else if (res == 0) {
+            closesocket(clientSock);
+            closesocket(sock);
+            return;
+        }
         else
             bytesSent += res;
     }
+    
+
+    //recieve data requested from server and close socket
+    totalBytes = BUF_LEN;
+    int bytesRecieved = 0;
+    while (true) {
+        res = recv(sock, buf, BUF_LEN, 0);
+        if (res == SOCKET_ERROR) {
+            cout << "recv: " << WSAGetLastError() << endl;
+            closesocket(clientSock);
+            closesocket(sock);
+            return;
+        }
+        if (res == 0) {
+            break;
+        }
+        else {
+            bytesRecieved += res;
+            int received = res;
+            //send data back to client
+            bytesSent = 0;
+            while (bytesSent < received) {
+                res = send(clientSock, (buf + bytesSent), (received - bytesSent), 0);
+                if (res == SOCKET_ERROR) {
+                    if (WSAGetLastError() != WSAEWOULDBLOCK) {
+                        cout << "send: " << WSAGetLastError() << endl;
+                        closesocket(clientSock);
+                        closesocket(sock);
+                        return;
+                    }
+                    this_thread::sleep_for(chrono::milliseconds(100));
+                }
+                else if (res == 0) {
+                    closesocket(clientSock);
+                    closesocket(sock);
+                    return;
+                }
+                else
+                    bytesSent += res;
+            }
+
+        }
+    }
+
 
     //Tell Server I'm done sending
     res = shutdown(sock, SD_SEND);
     if (res == SOCKET_ERROR) {
         cout << "shutdown: " << WSAGetLastError() << endl;
+        closesocket(clientSock);
+        closesocket(sock);
         return;
-    }
-
-
-    //recieve data requested from server and close socket
-    totalBytes = sizeof(buf);
-    int bytesRecieved = 0;
-    while (bytesRecieved != totalBytes) {
-        res = recv(sock,(buf + bytesRecieved), (BUF_LEN- bytesRecieved), 0);
-        if (res == SOCKET_ERROR) {
-            cout << "recv: " << WSAGetLastError() << endl;
-            return;
-        }
-        if (res == 0) {
-            buf[bytesRecieved] = '\0';
-            break;
-        }
-        bytesRecieved += res;
-    }
-    //Close Server Socket
-    res = closesocket(sock);
-    if (res != 0) {
-        cout << "closesocket: " << WSAGetLastError() << endl;
-        return;
-    }
-
-
-    //send data back to client
-    totalBytes = bytesRecieved;
-    bytesSent = 0;
-    while (bytesSent < bytesRecieved) {
-        res = send(clientSock, (buf + bytesSent), (totalBytes - bytesSent), 0);
-        if (res == SOCKET_ERROR) {
-            if (WSAGetLastError() != WSAEWOULDBLOCK) {
-                cout << "send: " << WSAGetLastError() << endl;
-                return;
-            }
-            this_thread::sleep_for(chrono::milliseconds(100));
-        }
-        else
-            bytesSent += res;
     }
 
     //Tell Client I'm done sending
     res = shutdown(clientSock, SD_SEND);
     if (res == SOCKET_ERROR) {
         cout << "shutdown: " << WSAGetLastError() << endl;
-        return;
     }
 
+    //Close Server Socket
+    res = closesocket(sock);
+    if (res != 0) {
+        cout << "closesocket: " << WSAGetLastError() << endl;
+    }
     //Close client Socket
     res = closesocket(clientSock);
     if (res != 0) {
         cout << "closesocket: " << WSAGetLastError() << endl;
-        return;
     }
+
+    return;
 }
 
 SOCKET CreateSocketFromMessageRequest(string message) {
@@ -225,7 +272,6 @@ SOCKET CreateSocketFromMessageRequest(string message) {
 
     size_t length = end - start;
     string hostName = message.substr(start, length);
-
 
     //Create Address Object
     sockaddr_in myAddr; //destination
@@ -283,6 +329,7 @@ SOCKET CreateSocketFromMessageRequest(string message) {
         res = connect(sock, reinterpret_cast<sockaddr*>(&myAddr), sizeof(myAddr));
         if (res == SOCKET_ERROR) {
             cout << "connect: " << WSAGetLastError() << endl;
+            closesocket(sock);
             return INVALID_SOCKET;
         }
     }
