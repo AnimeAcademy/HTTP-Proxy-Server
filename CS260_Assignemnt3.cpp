@@ -94,10 +94,10 @@ int main(int argc, char* argv[])
 
         //Listens and accepts incoming traffic
         while (true) {
-          
+
             SOCKET clientSock = accept(sock, (sockaddr*)&clientAddr, &addrLen);
             if (clientSock == INVALID_SOCKET) {
-                if(WSAGetLastError() != WSAEWOULDBLOCK)
+                if (WSAGetLastError() != WSAEWOULDBLOCK)
                     cout << "accept: " << WSAGetLastError() << endl;
                 this_thread::sleep_for(chrono::milliseconds(100));
             }
@@ -106,11 +106,14 @@ int main(int argc, char* argv[])
                 thread worker(Client, clientSock);
                 worker.detach();
             }
-
-
         }
 
-        //closesocket(sock);
+        //close listening socket
+    res = closesocket(sock);
+    if (res != 0) {
+        cout << "closesocket: " << WSAGetLastError() << endl;
+    }
+
 
     //Shutting Down Library
     res = WSACleanup();
@@ -133,7 +136,10 @@ void Client(SOCKET clientSock) {
             int error = WSAGetLastError();
             if (error != WSAEWOULDBLOCK) {
                 cout << "recv: " << error << endl;
-                closesocket(clientSock);
+                res = closesocket(clientSock);
+                if (res != 0) {
+                    cout << "closesocket: " << WSAGetLastError() << endl;
+                }
                 return;
             }
             else {
@@ -141,7 +147,10 @@ void Client(SOCKET clientSock) {
             }
         }
         else if (res == 0) {//done receiving
-            closesocket(clientSock);
+            res = closesocket(clientSock);
+            if (res != 0) {
+                cout << "closesocket: " << WSAGetLastError() << endl;
+            }
             return;
         }
         else {//take recieved bytes and store full message then check to see if we have the request
@@ -151,7 +160,10 @@ void Client(SOCKET clientSock) {
                 //found it and continue with request
                 sock = CreateSocketFromMessageRequest(message);
                 if (sock == INVALID_SOCKET) {
-                    closesocket(clientSock);
+                    res = closesocket(clientSock);
+                    if (res != 0) {
+                        cout << "closesocket: " << WSAGetLastError() << endl;
+                    }
                     return;
                 }
                 break;
@@ -168,15 +180,27 @@ void Client(SOCKET clientSock) {
         if (res == SOCKET_ERROR) {
             if (WSAGetLastError() != WSAEWOULDBLOCK) {
                 cout << "send: " << WSAGetLastError() << endl;
-                closesocket(clientSock);
-                closesocket(sock);
+                res = closesocket(clientSock);
+                if (res != 0) {
+                    cout << "closesocket: " << WSAGetLastError() << endl;
+                }
+                res = closesocket(sock);
+                if (res != 0) {
+                    cout << "closesocket: " << WSAGetLastError() << endl;
+                }
                 return;
             }
             this_thread::sleep_for(chrono::milliseconds(100));
         }
         else if (res == 0) {
-            closesocket(clientSock);
-            closesocket(sock);
+            res = closesocket(clientSock);
+            if (res != 0) {
+                cout << "closesocket: " << WSAGetLastError() << endl;
+            }
+            res = closesocket(sock);
+            if (res != 0) {
+                cout << "closesocket: " << WSAGetLastError() << endl;
+            }
             return;
         }
         else
@@ -191,8 +215,14 @@ void Client(SOCKET clientSock) {
         res = recv(sock, buf, BUF_LEN, 0);
         if (res == SOCKET_ERROR) {
             cout << "recv: " << WSAGetLastError() << endl;
-            closesocket(clientSock);
-            closesocket(sock);
+            res = closesocket(clientSock);
+            if (res != 0) {
+                cout << "closesocket: " << WSAGetLastError() << endl;
+            }
+            res = closesocket(sock);
+            if (res != 0) {
+                cout << "closesocket: " << WSAGetLastError() << endl;
+            }
             return;
         }
         if (res == 0) {
@@ -208,15 +238,27 @@ void Client(SOCKET clientSock) {
                 if (res == SOCKET_ERROR) {
                     if (WSAGetLastError() != WSAEWOULDBLOCK) {
                         cout << "send: " << WSAGetLastError() << endl;
-                        closesocket(clientSock);
-                        closesocket(sock);
+                        res = closesocket(clientSock);
+                        if (res != 0) {
+                            cout << "closesocket: " << WSAGetLastError() << endl;
+                        }
+                        res = closesocket(sock);
+                        if (res != 0) {
+                            cout << "closesocket: " << WSAGetLastError() << endl;
+                        }
                         return;
                     }
                     this_thread::sleep_for(chrono::milliseconds(100));
                 }
                 else if (res == 0) {
-                    closesocket(clientSock);
-                    closesocket(sock);
+                    res = closesocket(clientSock);
+                    if (res != 0) {
+                        cout << "closesocket: " << WSAGetLastError() << endl;
+                    }
+                    res = closesocket(sock);
+                    if (res != 0) {
+                        cout << "closesocket: " << WSAGetLastError() << endl;
+                    }
                     return;
                 }
                 else
@@ -231,8 +273,14 @@ void Client(SOCKET clientSock) {
     res = shutdown(sock, SD_SEND);
     if (res == SOCKET_ERROR) {
         cout << "shutdown: " << WSAGetLastError() << endl;
-        closesocket(clientSock);
-        closesocket(sock);
+        res = closesocket(clientSock);
+        if (res != 0) {
+            cout << "closesocket: " << WSAGetLastError() << endl;
+        }
+        res = closesocket(sock);
+        if (res != 0) {
+            cout << "closesocket: " << WSAGetLastError() << endl;
+        }
         return;
     }
 
@@ -307,7 +355,9 @@ SOCKET CreateSocketFromMessageRequest(string message) {
                 res = connect(sok, current->ai_addr, current->ai_addrlen);
                 if (res == SOCKET_ERROR) {
                     cout << "connect: " << WSAGetLastError() << endl;
-                    closesocket(sok);
+                    if (closesocket(sok) != 0) {
+                        cout << "closesocket: " << WSAGetLastError() << endl;
+                    }
                     continue;
                 }
                 else {
@@ -329,7 +379,9 @@ SOCKET CreateSocketFromMessageRequest(string message) {
         res = connect(sock, reinterpret_cast<sockaddr*>(&myAddr), sizeof(myAddr));
         if (res == SOCKET_ERROR) {
             cout << "connect: " << WSAGetLastError() << endl;
-            closesocket(sock);
+            if (closesocket(sock) != 0) {
+                cout << "closesocket: " << WSAGetLastError() << endl;
+            }
             return INVALID_SOCKET;
         }
     }
