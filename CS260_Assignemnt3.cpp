@@ -352,7 +352,7 @@ SOCKET CreateSocketFromMessageRequest(string message) {
                 continue;
             }
             else {
-                res = connect(sok, current->ai_addr, current->ai_addrlen);
+                res = connect(sok, current->ai_addr, (int)current->ai_addrlen);
                 if (res == SOCKET_ERROR) {
                     cout << "connect: " << WSAGetLastError() << endl;
                     if (closesocket(sok) != 0) {
